@@ -53,6 +53,7 @@ class MusoAPI:
         }
         self.base_url = "https://api.developer.muso.ai/v4"
         self.relevante_kategorien = ["Composer", "Lyricist", "Co-Writer", "Primary Artist", "Producer", "Co-Producer"]
+        self.unmatched_tracks = []
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def search_track(self, keyword: str) -> Dict[str, Any]:
@@ -82,6 +83,10 @@ class MusoAPI:
         search_results = self.search_track(track_info['search_string'])
         if not search_results["data"]["tracks"]["items"]:
             logger.warning(f"No track found for: {track}")
+            self.unmatched_tracks.append({
+                "track_name": track,
+                "artist": track_info['artist']
+            })
             return None
 
         found_match = False
@@ -133,6 +138,10 @@ class MusoAPI:
 
         if not found_match:
             logger.warning(f"No matching track found for: {track}")
+            self.unmatched_tracks.append({
+                "track_name": track,
+                "artist": track_info['artist']
+            })
             return None
 
 def process_credits(credits: List[Dict], track_title: str) -> pd.DataFrame:
@@ -149,11 +158,12 @@ def process_credits(credits: List[Dict], track_title: str) -> pd.DataFrame:
 
     return pd.DataFrame(daten).drop_duplicates().sort_values(by=["Track", "Rolle", "Name"])
 
-def format_final_results(df: pd.DataFrame) -> pd.DataFrame:
+def format_final_results(df: pd.DataFrame, unmatched_tracks: List[Dict[str, str]] = None) -> pd.DataFrame:
     writer_roles = ["Composer", "Lyricist", "Co-Writer"]
     producer_roles = ["Producer", "Co-Producer"]
     final_rows = []
 
+    # Process matched tracks
     for track_title in df["Track"].unique():
         track_data = df[df["Track"] == track_title]
         artist_rows = track_data[track_data["Rolle"] == "Primary Artist"]
@@ -163,23 +173,24 @@ def format_final_results(df: pd.DataFrame) -> pd.DataFrame:
         producers = track_data[track_data["Rolle"].isin(producer_roles)]["Name"].unique().tolist()
 
         row = {
-            "Titel": track_title,
+            "Song": track_title,
             "Artist": artist,
-            "track_id": track_data["track_id"].iloc[0],
-            "release_date": track_data["release_date"].iloc[0],
-            "popularity": track_data["popularity"].iloc[0],
-            "isrcs": track_data["isrcs"].iloc[0],
-            "album_title": track_data["album_title"].iloc[0],
-            "album_id": track_data["album_id"].iloc[0],
-            "artists": track_data["artists"].iloc[0]
+            "Writers": ", ".join(writers) if writers else "Unknown",
+            "Producers": ", ".join(producers) if producers else "Unknown"
         }
 
-        for i, writer in enumerate(writers, start=1):
-            row[f"Writer {i}"] = writer
-        for i, producer in enumerate(producers, start=1):
-            row[f"Producer {i}"] = producer
-
         final_rows.append(row)
+
+    # Add unmatched tracks
+    if unmatched_tracks:
+        for track_info in unmatched_tracks:
+            row = {
+                "Song": track_info["track_name"],
+                "Artist": track_info["artist"],
+                "Writers": "Not found",
+                "Producers": "Not found"
+            }
+            final_rows.append(row)
 
     return pd.DataFrame(final_rows)
 
@@ -219,7 +230,7 @@ def main():
 
         # Combine and format results
         final_df = pd.concat(all_results, ignore_index=True)
-        formatted_df = format_final_results(final_df)
+        formatted_df = format_final_results(final_df, muso_api.unmatched_tracks)
 
         # Save results
         formatted_df.to_csv("playlist_credits_formatted.csv", index=False)
