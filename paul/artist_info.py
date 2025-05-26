@@ -33,16 +33,16 @@ class SpotifyAPI:
         playlist_id = playlist_url.split("/")[-1].split("?")[0]
         playlist_tracks = self.sp.playlist_tracks(playlist_id)
 
-        tracks_to_search = []
+        track_dictionary = {}
         for item in playlist_tracks['items']:
             track_name = item['track']['name']
-            artist_name = item['track']['artists'][0]['name']
-            tracks_to_search.append({
-                'track_name': track_name,
-                'artist_name': artist_name,
-                'full_query': f"{track_name} {artist_name}"
-            })
-        return tracks_to_search
+            track_dictionary[track_name] = {
+                'artist': item['track']['artists'][0]['name'].lower().strip(),
+                'release_date': item['track']['album']['release_date'],
+                'album': item['track']['album']['name'].lower().strip(),
+                'search_string': f"{item['track']['artists'][0]['name']} : {track_name}"
+            }
+        return track_dictionary
 
 class MusoAPI:
     def __init__(self):
@@ -52,13 +52,14 @@ class MusoAPI:
             "Content-Type": "application/json"
         }
         self.base_url = "https://api.developer.muso.ai/v4"
+        self.relevante_kategorien = ["Composer", "Lyricist", "Co-Writer", "Primary Artist", "Producer", "Co-Producer"]
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def search_track(self, keyword: str) -> Dict[str, Any]:
         search_data = {
             "keyword": keyword,
             "type": ["track"],
-            "limit": 1
+            "limit": 10
         }
         response = requests.post(
             f"{self.base_url}/search",
@@ -76,6 +77,63 @@ class MusoAPI:
         )
         response.raise_for_status()
         return response.json()
+
+    def process_track(self, track: str, track_info: Dict[str, str]) -> pd.DataFrame:
+        search_results = self.search_track(track_info['search_string'])
+        if not search_results["data"]["tracks"]["items"]:
+            logger.warning(f"No track found for: {track}")
+            return None
+
+        found_match = False
+        for potential_match in search_results["data"]["tracks"]["items"]:
+            title_match = potential_match["title"].lower().strip() == track.lower().strip()
+            album_match = potential_match["album"]["title"].lower().strip() == track_info['album'].lower().strip()
+
+            if title_match and album_match:
+                track_id = potential_match["id"]
+                track_title = potential_match["title"]
+                track_release_date = potential_match.get("releaseDate", "")
+                track_popularity = potential_match.get("popularity", None)
+                track_isrcs = ", ".join(potential_match.get("isrcs", []))
+                album = potential_match.get("album", {})
+                album_id = album.get("id", "")
+                album_title = album.get("title", "")
+                album_art = album.get("albumArt", "")
+                artist_list = [artist["name"] for artist in potential_match.get("artists", [])]
+                artists_combined = ", ".join(artist_list)
+
+                track_details = self.get_track_details(track_id)
+                credits = track_details["data"].get("credits", [])
+                daten = []
+
+                for eintrag in credits:
+                    for credit_item in eintrag.get("credits", []):
+                        rolle = credit_item.get("child", "")
+                        if rolle in self.relevante_kategorien:
+                            for person in credit_item.get("collaborators", []):
+                                name = person.get("name", "Unbekannt")
+                                daten.append({
+                                    "Track": track_title,
+                                    "Name": name,
+                                    "Rolle": rolle,
+                                    "track_id": track_id,
+                                    "release_date": track_release_date,
+                                    "popularity": track_popularity,
+                                    "isrcs": track_isrcs,
+                                    "album_title": album_title,
+                                    "album_id": album_id,
+                                    "album_art": album_art,
+                                    "artists": artists_combined
+                                })
+
+                if daten:
+                    df = pd.DataFrame(daten).drop_duplicates().sort_values(by=["Track", "Rolle", "Name"])
+                    found_match = True
+                    return df
+
+        if not found_match:
+            logger.warning(f"No matching track found for: {track}")
+            return None
 
 def process_credits(credits: List[Dict], track_title: str) -> pd.DataFrame:
     relevante_kategorien = ["Composer", "Lyricist", "Co-Writer", "Primary Artist", "Producer", "Co-Producer"]
@@ -98,15 +156,24 @@ def format_final_results(df: pd.DataFrame) -> pd.DataFrame:
 
     for track_title in df["Track"].unique():
         track_data = df[df["Track"] == track_title]
-
         artist_rows = track_data[track_data["Rolle"] == "Primary Artist"]
         artist_list = artist_rows["Name"].unique().tolist()
         artist = ", ".join(artist_list) if artist_list else "Unbekannt"
-
         writers = track_data[track_data["Rolle"].isin(writer_roles)]["Name"].unique().tolist()
         producers = track_data[track_data["Rolle"].isin(producer_roles)]["Name"].unique().tolist()
 
-        row = {"Titel": track_title, "Artist": artist}
+        row = {
+            "Titel": track_title,
+            "Artist": artist,
+            "track_id": track_data["track_id"].iloc[0],
+            "release_date": track_data["release_date"].iloc[0],
+            "popularity": track_data["popularity"].iloc[0],
+            "isrcs": track_data["isrcs"].iloc[0],
+            "album_title": track_data["album_title"].iloc[0],
+            "album_id": track_data["album_id"].iloc[0],
+            "artists": track_data["artists"].iloc[0]
+        }
+
         for i, writer in enumerate(writers, start=1):
             row[f"Writer {i}"] = writer
         for i, producer in enumerate(producers, start=1):
@@ -129,33 +196,21 @@ def main():
         all_results = []
         total_tracks = len(tracks_to_search)
 
-        for idx, track_info in enumerate(tracks_to_search, 1):
-            logger.info(f"Processing track {idx}/{total_tracks}: {track_info['full_query']}")
+        for idx, track_info in enumerate(tracks_to_search.items(), 1):
+            track = track_info[0]
+            logger.info(f"Processing track {idx}/{total_tracks}: {track}")
 
             try:
-                # Search track
-                search_results = muso_api.search_track(track_info['full_query'])
-                if not search_results["data"]["tracks"]["items"]:
-                    logger.warning(f"No track found for: {track_info['full_query']}")
+                # Process track
+                df = muso_api.process_track(track, track_info[1])
+                if df is None:
                     continue
-
-                track = search_results["data"]["tracks"]["items"][0]
-                track_id = track["id"]
-                track_title = track["title"]
-                logger.info(f"Found track: {track_title}")
-
-                # Get track details
-                track_details = muso_api.get_track_details(track_id)
-                credits = track_details["data"].get("credits", [])
-
-                # Process credits
-                df = process_credits(credits, track_title)
                 all_results.append(df)
 
                 time.sleep(2)  # Rate limiting
 
             except Exception as e:
-                logger.error(f"Error processing track {track_info['full_query']}: {str(e)}")
+                logger.error(f"Error processing track {track}: {str(e)}")
                 continue
 
         if not all_results:
