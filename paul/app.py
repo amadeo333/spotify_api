@@ -3,7 +3,7 @@ import pandas as pd
 from artist_info import SpotifyAPI, MusoAPI, format_final_results
 import time
 import logging
-from io import StringIO
+from io import StringIO, BytesIO
 import base64
 
 # Configure logging
@@ -45,6 +45,7 @@ if playlist_url:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
+            # Process each track in playlist order
             for idx, (track, track_info) in enumerate(track_dictionary.items(), 1):
                 status_text.text(f"Processing track {idx}/{total_tracks}: {track}")
                 progress_bar.progress(idx / total_tracks)
@@ -58,9 +59,9 @@ if playlist_url:
                     logger.error(f"Error processing track {track}: {str(e)}")
                     continue
 
-            if all_results:
+            if all_results or muso_api.unmatched_tracks:
                 # Combine all results
-                final_df = pd.concat(all_results, ignore_index=True)
+                final_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
 
                 # Format results
                 formatted_df = format_final_results(final_df, muso_api.unmatched_tracks)
@@ -76,15 +77,26 @@ if playlist_url:
                 if muso_api.unmatched_tracks:
                     st.warning(f"Could not find credits for {len(muso_api.unmatched_tracks)} tracks")
 
-                # Download button
-                def get_download_link(df, filename):
-                    csv = df.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
+                # Download buttons
+                def get_download_link(df, filename, file_type):
+                    if file_type == 'csv':
+                        csv = df.to_csv(index=False)
+                        b64 = base64.b64encode(csv.encode()).decode()
+                        href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
+                    else:  # excel
+                        towrite = BytesIO()
+                        df.to_excel(towrite, index=False, engine='openpyxl')
+                        towrite.seek(0)
+                        b64 = base64.b64encode(towrite.read()).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">Download {filename}</a>'
                     return href
 
                 st.markdown("### Download Results")
-                st.markdown(get_download_link(formatted_df, "playlist_credits.csv"), unsafe_allow_html=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(get_download_link(formatted_df, "playlist_credits.csv", 'csv'), unsafe_allow_html=True)
+                with col2:
+                    st.markdown(get_download_link(formatted_df, "playlist_credits.xlsx", 'excel'), unsafe_allow_html=True)
             else:
                 st.warning("No credits information found for any tracks in the playlist.")
 
