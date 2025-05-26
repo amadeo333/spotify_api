@@ -168,16 +168,22 @@ def format_final_results(df: pd.DataFrame, unmatched_tracks: List[Dict[str, str]
         track_data = df[df["Track"] == track_title]
         artist_rows = track_data[track_data["Rolle"] == "Primary Artist"]
         artist_list = artist_rows["Name"].unique().tolist()
-        artist = ", ".join(artist_list) if artist_list else "Unbekannt"
+        artist = ", ".join(artist_list) if artist_list else ""
         writers = track_data[track_data["Rolle"].isin(writer_roles)]["Name"].unique().tolist()
         producers = track_data[track_data["Rolle"].isin(producer_roles)]["Name"].unique().tolist()
 
         row = {
             "Song": track_title,
-            "Artist": artist,
-            "Writers": ", ".join(writers) if writers else "Unknown",
-            "Producers": ", ".join(producers) if producers else "Unknown"
+            "Artist": artist
         }
+
+        # Add writers
+        for i, writer in enumerate(writers, start=1):
+            row[f"Writer {i}"] = writer
+
+        # Add producers
+        for i, producer in enumerate(producers, start=1):
+            row[f"Producer {i}"] = producer
 
         final_rows.append(row)
 
@@ -186,13 +192,26 @@ def format_final_results(df: pd.DataFrame, unmatched_tracks: List[Dict[str, str]
         for track_info in unmatched_tracks:
             row = {
                 "Song": track_info["track_name"],
-                "Artist": track_info["artist"],
-                "Writers": "Not found",
-                "Producers": "Not found"
+                "Artist": track_info["artist"]
             }
             final_rows.append(row)
 
-    return pd.DataFrame(final_rows)
+    # Create DataFrame and ensure all columns exist
+    result_df = pd.DataFrame(final_rows)
+
+    # Add empty writer and producer columns if they don't exist
+    max_writers = max([len(row.get("Writer", [])) for row in final_rows if "Writer" in row], default=0)
+    max_producers = max([len(row.get("Producer", [])) for row in final_rows if "Producer" in row], default=0)
+
+    for i in range(1, max_writers + 1):
+        if f"Writer {i}" not in result_df.columns:
+            result_df[f"Writer {i}"] = ""
+
+    for i in range(1, max_producers + 1):
+        if f"Producer {i}" not in result_df.columns:
+            result_df[f"Producer {i}"] = ""
+
+    return result_df
 
 def main():
     try:
