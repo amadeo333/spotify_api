@@ -207,25 +207,28 @@ def format_final_results(df: pd.DataFrame, unmatched_tracks: List[Dict[str, str]
         # If no unmatched tracks, just add processed tracks
         final_rows.extend(processed_tracks.values())
 
-    # Create DataFrame and ensure all columns exist
+    # Create DataFrame
     result_df = pd.DataFrame(final_rows)
 
     # Get maximum number of writers and producers
     max_writers = max([len([k for k in row.keys() if k.startswith("Writer")]) for row in final_rows], default=0)
     max_producers = max([len([k for k in row.keys() if k.startswith("Producer")]) for row in final_rows], default=0)
 
-    # Reorder columns to group writers before producers
+    # Create column order
     column_order = ["Song", "Artist"]
     column_order.extend([f"Writer {i}" for i in range(1, max_writers + 1)])
     column_order.extend([f"Producer {i}" for i in range(1, max_producers + 1)])
 
-    # Add empty columns if they don't exist
+    # Ensure all columns exist and are in the correct order
     for col in column_order:
         if col not in result_df.columns:
             result_df[col] = ""
 
     # Reorder columns
     result_df = result_df[column_order]
+
+    # Fill NaN values with empty strings
+    result_df = result_df.fillna("")
 
     return result_df
 
