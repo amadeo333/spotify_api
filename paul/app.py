@@ -59,35 +59,38 @@ if playlist_url:
                     logger.error(f"Error processing track {track}: {str(e)}")
                     continue
 
-            if all_results or muso_api.unmatched_tracks:
-                # Combine all results
-                final_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+            # Create a list of all tracks in playlist order
+            all_tracks = []
+            for track, track_info in track_dictionary.items():
+                all_tracks.append({
+                    "track_name": track,
+                    "artist": track_info['artist']
+                })
 
-                # Format results
-                formatted_df = format_final_results(final_df, muso_api.unmatched_tracks)
+            # Format results
+            final_df = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+            formatted_df = format_final_results(final_df, all_tracks)
 
-                # Display results
-                st.success("Analysis complete! Here are the results:")
+            # Display results
+            st.success("Analysis complete! Here are the results:")
 
-                # Display formatted results
-                st.subheader("All Tracks")
-                st.dataframe(formatted_df)
+            # Display formatted results
+            st.subheader("All Tracks")
+            st.dataframe(formatted_df)
 
-                # Display unmatched tracks count
-                if muso_api.unmatched_tracks:
-                    st.warning(f"Could not find credits for {len(muso_api.unmatched_tracks)} tracks")
+            # Display unmatched tracks count
+            if muso_api.unmatched_tracks:
+                st.warning(f"Could not find credits for {len(muso_api.unmatched_tracks)} tracks")
 
-                # Download button
-                def get_download_link(df, filename):
-                    csv = df.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
-                    return href
+            # Download button
+            def get_download_link(df, filename):
+                csv = df.to_csv(index=False)
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
+                return href
 
-                st.markdown("### Download Results")
-                st.markdown(get_download_link(formatted_df, "playlist_credits.csv"), unsafe_allow_html=True)
-            else:
-                st.warning("No credits information found for any tracks in the playlist.")
+            st.markdown("### Download Results")
+            st.markdown(get_download_link(formatted_df, "playlist_credits.csv"), unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
