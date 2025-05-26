@@ -163,6 +163,9 @@ def format_final_results(df: pd.DataFrame, unmatched_tracks: List[Dict[str, str]
     producer_roles = ["Producer", "Co-Producer"]
     final_rows = []
 
+    # Create a dictionary to store processed tracks
+    processed_tracks = {}
+
     # Process matched tracks
     for track_title in df["Track"].unique():
         track_data = df[df["Track"] == track_title]
@@ -185,31 +188,44 @@ def format_final_results(df: pd.DataFrame, unmatched_tracks: List[Dict[str, str]
         for i, producer in enumerate(producers, start=1):
             row[f"Producer {i}"] = producer
 
-        final_rows.append(row)
+        processed_tracks[track_title] = row
 
-    # Add unmatched tracks
+    # Create final rows maintaining playlist order
     if unmatched_tracks:
+        # First add all tracks from the playlist in order
         for track_info in unmatched_tracks:
-            row = {
-                "Song": track_info["track_name"],
-                "Artist": track_info["artist"]
-            }
-            final_rows.append(row)
+            track_name = track_info["track_name"]
+            if track_name in processed_tracks:
+                final_rows.append(processed_tracks[track_name])
+            else:
+                row = {
+                    "Song": track_name,
+                    "Artist": track_info["artist"]
+                }
+                final_rows.append(row)
+    else:
+        # If no unmatched tracks, just add processed tracks
+        final_rows.extend(processed_tracks.values())
 
     # Create DataFrame and ensure all columns exist
     result_df = pd.DataFrame(final_rows)
 
-    # Add empty writer and producer columns if they don't exist
-    max_writers = max([len(row.get("Writer", [])) for row in final_rows if "Writer" in row], default=0)
-    max_producers = max([len(row.get("Producer", [])) for row in final_rows if "Producer" in row], default=0)
+    # Get maximum number of writers and producers
+    max_writers = max([len([k for k in row.keys() if k.startswith("Writer")]) for row in final_rows], default=0)
+    max_producers = max([len([k for k in row.keys() if k.startswith("Producer")]) for row in final_rows], default=0)
 
-    for i in range(1, max_writers + 1):
-        if f"Writer {i}" not in result_df.columns:
-            result_df[f"Writer {i}"] = ""
+    # Reorder columns to group writers before producers
+    column_order = ["Song", "Artist"]
+    column_order.extend([f"Writer {i}" for i in range(1, max_writers + 1)])
+    column_order.extend([f"Producer {i}" for i in range(1, max_producers + 1)])
 
-    for i in range(1, max_producers + 1):
-        if f"Producer {i}" not in result_df.columns:
-            result_df[f"Producer {i}"] = ""
+    # Add empty columns if they don't exist
+    for col in column_order:
+        if col not in result_df.columns:
+            result_df[col] = ""
+
+    # Reorder columns
+    result_df = result_df[column_order]
 
     return result_df
 
