@@ -63,20 +63,20 @@ if playlist_url:
                 final_df = pd.concat(all_results, ignore_index=True)
 
                 # Format results
-                formatted_df = format_final_results(final_df)
+                formatted_df = format_final_results(final_df, muso_api.unmatched_tracks)
 
                 # Display results
                 st.success("Analysis complete! Here are the results:")
 
                 # Display formatted results
-                st.subheader("Formatted Results")
+                st.subheader("All Tracks")
                 st.dataframe(formatted_df)
 
-                # Display detailed results
-                st.subheader("Detailed Results")
-                st.dataframe(final_df)
+                # Display unmatched tracks count
+                if muso_api.unmatched_tracks:
+                    st.warning(f"Could not find credits for {len(muso_api.unmatched_tracks)} tracks")
 
-                # Download buttons
+                # Download button
                 def get_download_link(df, filename):
                     csv = df.to_csv(index=False)
                     b64 = base64.b64encode(csv.encode()).decode()
@@ -84,8 +84,7 @@ if playlist_url:
                     return href
 
                 st.markdown("### Download Results")
-                st.markdown(get_download_link(formatted_df, "playlist_credits_formatted.csv"), unsafe_allow_html=True)
-                st.markdown(get_download_link(final_df, "playlist_credits.csv"), unsafe_allow_html=True)
+                st.markdown(get_download_link(formatted_df, "playlist_credits.csv"), unsafe_allow_html=True)
             else:
                 st.warning("No credits information found for any tracks in the playlist.")
 
